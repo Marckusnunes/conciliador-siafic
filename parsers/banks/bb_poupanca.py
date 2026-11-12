@@ -23,15 +23,16 @@ class BBPoupancaParser(BaseBankParser):
         conta_orig = cc_match.group(1).strip() if cc_match else ""
         chave_7d, chave_7d_sem_dv = normalize_account_keys(conta_orig)
 
-        # Extrai o saldo final (aceita 'SALDO', 'Saldo' ou 'Saldo Atual')
+        # Extrai o saldo final exigindo que a linha tenha um valor em dinheiro
         saldo_lines = [
             line for line in text.splitlines()
             if re.search(r"\bSALDO\b", line, re.IGNORECASE)
             and "ANTERIOR" not in line.upper()
             and "ANT." not in line.upper()
+            and bool(extract_money_tokens(line))
         ]
         if not saldo_lines:
-            raise ValueError(f"Linha 'SALDO' não encontrada na poupança '{filename}'.")
+            raise ValueError(f"Linha 'SALDO' com valor numérico não encontrada na poupança '{filename}'.")
 
         saldo_aplic = extract_money_tokens(saldo_lines[-1])[-1]
 
