@@ -1,6 +1,6 @@
 """
 ui/tab_audit.py
-Aba 3: Trilha de Auditoria e conferência dos extratos identificados.
+Abas 3 e 4: Log de Leitura dos PDFs/CSVs e Tabela De-Para aplicada.
 """
 
 from decimal import Decimal
@@ -12,24 +12,23 @@ from core.models import RegistroBanco
 
 
 def _fmt_brl(valor: Decimal) -> str:
-    return f"R$ {valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
+    return f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
-def render_tab_audit(
+def render_tab_log(
     registros_bancos: list[RegistroBanco],
     logger: AuditLogger,
 ) -> None:
-    """Exibe como cada PDF foi classificado e o diário completo de execução."""
-    st.subheader("1. Classificação Automática dos Extratos PDF")
+    """Exibe a tabela resumo dos PDFs lidos e a trilha completa de execução."""
+    st.subheader("Resumo dos Extratos Bancários Lidos")
     if registros_bancos:
         dados_pdfs = [
             {
-                "Arquivo PDF": r.fonte_arquivo,
-                "Banco Identificado": r.banco,
-                "Tipo de Conta": r.tipo_conta,
-                "Agência": r.agencia,
-                "Conta Original": r.conta_original,
-                "Chave (7d)": r.chave_7d,
+                "Arquivo": r.fonte_arquivo,
+                "Banco": r.banco,
+                "Tipo": r.tipo_conta,
+                "Conta Lida": r.conta_original,
+                "Chave Gerada": r.chave_7d,
                 "Saldo CC": _fmt_brl(r.saldo_cc),
                 "Saldo Aplic./Poup.": _fmt_brl(r.saldo_aplic),
                 "Rendimento": _fmt_brl(r.rendimento),
@@ -38,10 +37,10 @@ def render_tab_audit(
         ]
         st.dataframe(pd.DataFrame(dados_pdfs), use_container_width=True, hide_index=True)
     else:
-        st.info("Nenhum extrato PDF foi processado.")
+        st.info("Nenhum extrato PDF foi lido nesta execução.")
 
     st.divider()
-    st.subheader("2. Log Detalhado da Execução (Trilha de Auditoria)")
+    st.subheader("Trilha de Auditoria Detalhada")
     if logger.eventos:
         dados_log = [
             {
@@ -53,5 +52,15 @@ def render_tab_audit(
             for ev in logger.eventos
         ]
         st.dataframe(pd.DataFrame(dados_log), use_container_width=True, hide_index=True)
+
+
+def render_tab_depara(mapa_de_para: dict[str, str]) -> None:
+    """Exibe as regras De-Para ativas na conciliação."""
+    if mapa_de_para:
+        st.success(f"✅ De-Para ativo! {len(mapa_de_para)} mapeamento(s) carregado(s).")
+        df_dp = pd.DataFrame(
+            [{"Chave Antiga (Origem)": k, "Chave Nova (Destino)": v} for k, v in mapa_de_para.items()]
+        )
+        st.dataframe(df_dp, use_container_width=True, hide_index=True)
     else:
-        st.info("Nenhum evento registrado.")
+        st.info("Nenhuma regra De-Para cadastrada ou arquivo De-Para vazio.")
