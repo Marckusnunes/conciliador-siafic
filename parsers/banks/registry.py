@@ -29,17 +29,24 @@ def get_default_parsers() -> list[BaseBankParser]:
     ]
 
 
+def extract_raw_pdf_text(file_bytes: bytes) -> str:
+    """Extrai todo o texto bruto de um arquivo PDF."""
+    with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
+        return "\n".join(page.extract_text() or "" for page in pdf.pages)
+
+
 def parse_bank_pdf(
     file_bytes: bytes,
     filename: str,
     logger: AuditLogger | None = None,
 ) -> list[RegistroBanco]:
     """Lê o texto do PDF e aciona o especialista correspondente."""
-    with pdfplumber.open(io.BytesIO(file_bytes)) as pdf:
-        full_text = "\n".join(page.extract_text() or "" for page in pdf.pages)
+    full_text = extract_raw_pdf_text(file_bytes)
 
     if not full_text.strip():
-        raise ValueError(f"O PDF '{filename}' não possui texto selecionável (pode ser imagem escaneada).")
+        raise ValueError(
+            f"O PDF '{filename}' não possui texto selecionável (pode ser imagem escaneada)."
+        )
 
     for parser in get_default_parsers():
         if parser.can_parse(full_text):
@@ -55,4 +62,8 @@ def parse_bank_pdf(
                         logger.alerta(filename, obs)
             return registros
 
-    raise ValueError(f"Layout bancário não reconhecido no arquivo '{filename}'.")
+    amostra = " ".join(full_text.split())[:180]
+    raise ValueError(
+        f"Layout bancário não reconhecido no arquivo '{filename}'. "
+        f"Trecho inicial lido do PDF: [{amostra}...]"
+    )
