@@ -7,26 +7,28 @@ import re
 from decimal import Decimal
 from core.account_key import normalize_account_keys
 from core.models import RegistroBanco
-from parsers.banks.base import BaseBankParser, extract_money_tokens
+from parsers.banks.base import BaseBankParser, extract_money_tokens, normalize_pdf_text
 
 
 class BBPoupancaParser(BaseBankParser):
     def can_parse(self, text: str) -> bool:
-        upper = text.upper()
-        return "CONSULTAS - POUPEX" in upper or "POUPANÇA-OURO" in upper
+        norm = normalize_pdf_text(text)
+        return "CONSULTAS - POUPEX" in norm or "POUPANCA-OURO" in norm or "POUPANCA OURO" in norm
 
     def parse(self, text: str, filename: str) -> list[RegistroBanco]:
         ag_match = re.search(r"Ag[êe]ncia\s*\|?\s*([\d\-]+)", text, re.IGNORECASE)
-        cc_match = re.search(r"Conta\s*\|?\s*([\d\-X]+)", text, re.IGNORECASE)
+        cc_match = re.search(r"Conta\s*\|?\s*([\d\.\-X]+)", text, re.IGNORECASE)
 
         agencia = ag_match.group(1).strip() if ag_match else ""
         conta_orig = cc_match.group(1).strip() if cc_match else ""
         chave_7d, chave_7d_sem_dv = normalize_account_keys(conta_orig)
 
-        # Extrai o saldo final da linha iniciada por SALDO
+        # Extrai o saldo final (aceita 'SALDO', 'Saldo' ou 'Saldo Atual')
         saldo_lines = [
             line for line in text.splitlines()
-            if re.match(r"^\s*SALDO\b", line.strip())
+            if re.search(r"\bSALDO\b", line, re.IGNORECASE)
+            and "ANTERIOR" not in line.upper()
+            and "ANT." not in line.upper()
         ]
         if not saldo_lines:
             raise ValueError(f"Linha 'SALDO' não encontrada na poupança '{filename}'.")
@@ -37,7 +39,7 @@ class BBPoupancaParser(BaseBankParser):
         rendimento_total = Decimal("0.00")
         for line in text.splitlines():
             upper_line = line.upper()
-            if "REAJ.MON. BC" in upper_line or re.search(r"\bJUROS\b", upper_line):
+            if re.search(r"REAJ\.?\s*MON\.?\s*BC", upper_line) or re.search(r"\bJUROS\b", upper_line):
                 vals = extract_money_tokens(line)
                 if vals:
                     rendimento_total += vals[-1]
