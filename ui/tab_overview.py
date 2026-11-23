@@ -14,39 +14,26 @@ def _fmt_brl(valor: Decimal) -> str:
     return f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
-def _identificador_bac(r: ResultadoConciliacao, mapa_bac: dict[str, str] | None) -> str:
-    if mapa_bac and r.chave_conciliacao in mapa_bac:
-        return mapa_bac[r.chave_conciliacao]
-    return r.chave_conciliacao or "-"
-
-
-def _linha_agrupada(
-    r: ResultadoConciliacao,
-    mapa_bac: dict[str, str] | None = None,
-) -> dict[tuple[str, str], str]:
-    """Monta uma linha sem 'Banco / Descrição' e com 'Banco - Agência - Conta'."""
-    return {
-        ("Dados", "Banco - Agência - Conta"): _identificador_bac(r, mapa_bac),
-        ("Dados", "Conta Reduzida"): r.chave_conciliacao,
-        ("Dados", "Status"): r.status,
-        ("Conta Corrente", "Contábil"): _fmt_brl(r.siafic_cc),
-        ("Conta Corrente", "Banco"): _fmt_brl(r.banco_cc),
-        ("Conta Corrente", "Diferença"): _fmt_brl(r.dif_cc),
-        ("Aplicação", "Contábil"): _fmt_brl(r.siafic_aplic),
-        ("Aplicação", "Banco"): _fmt_brl(r.banco_aplic),
-        ("Aplicação", "Diferença"): _fmt_brl(r.dif_aplic),
-        ("Rendimentos", "Contábil"): _fmt_brl(r.siafic_rend),
-        ("Rendimentos", "Banco"): _fmt_brl(r.banco_rend),
-        ("Rendimentos", "Diferença"): _fmt_brl(r.dif_rend),
-    }
-
-
-def build_grouped_dataframe(
-    resultados: list[ResultadoConciliacao],
-    mapa_bac: dict[str, str] | None = None,
-) -> pd.DataFrame:
+def build_grouped_dataframe(resultados: list[ResultadoConciliacao]) -> pd.DataFrame:
     """Monta a tabela com cabeçalho duplo agrupado por bloco contábil."""
-    linhas = [_linha_agrupada(r, mapa_bac) for r in resultados]
+    linhas = []
+    for r in resultados:
+        bac = r.conta_completa or r.chave_conciliacao
+        linhas.append({
+            ("Dados", "Banco - Agência - Conta"): bac,
+            ("Dados", "Conta Reduzida"): r.chave_conciliacao,
+            ("Dados", "Status"): r.status,
+            ("Conta Corrente", "Contábil"): _fmt_brl(r.siafic_cc),
+            ("Conta Corrente", "Banco"): _fmt_brl(r.banco_cc),
+            ("Conta Corrente", "Diferença"): _fmt_brl(r.dif_cc),
+            ("Aplicação", "Contábil"): _fmt_brl(r.siafic_aplic),
+            ("Aplicação", "Banco"): _fmt_brl(r.banco_aplic),
+            ("Aplicação", "Diferença"): _fmt_brl(r.dif_aplic),
+            ("Rendimentos", "Contábil"): _fmt_brl(r.siafic_rend),
+            ("Rendimentos", "Banco"): _fmt_brl(r.banco_rend),
+            ("Rendimentos", "Diferença"): _fmt_brl(r.dif_rend),
+        })
+
     if not linhas:
         return pd.DataFrame()
 
@@ -55,28 +42,7 @@ def build_grouped_dataframe(
     return df
 
 
-def _filtrar_resultados(
-    resultados: list[ResultadoConciliacao],
-    busca: str,
-    mapa_bac: dict[str, str] | None = None,
-) -> list[ResultadoConciliacao]:
-    termo = busca.strip().lower()
-    if not termo:
-        return resultados
-    return [
-        r for r in resultados
-        if termo in r.chave_conciliacao.lower()
-        or termo in _identificador_bac(r, mapa_bac).lower()
-        or termo in r.banco.lower()
-        or termo in r.descricao.lower()
-        or termo in r.status.lower()
-    ]
-
-
-def render_tab_overview(
-    resultados: list[ResultadoConciliacao],
-    mapa_bac: dict[str, str] | None = None,
-) -> None:
+def render_tab_overview(resultados: list[ResultadoConciliacao]) -> None:
     """Exibe os indicadores resumidos, filtro rápido e a tabela agrupada."""
     total_contas = len(resultados)
     conciliadas = sum(1 for r in resultados if r.status == "Conciliado")
@@ -92,9 +58,19 @@ def render_tab_overview(
         placeholder="Digite conta (ex: 0088501), 001-2234 ou status...",
     )
 
-    filtrados = _filtrar_resultados(resultados, busca, mapa_bac)
-    df_display = build_grouped_dataframe(filtrados, mapa_bac)
+    filtrados = resultados
+    if busca.strip():
+        termo = busca.strip().lower()
+        filtrados = [
+            r for r in resultados
+            if termo in r.chave_conciliacao.lower()
+            or termo in (r.conta_completa or "").lower()
+            or termo in r.banco.lower()
+            or termo in r.descricao.lower()
+            or termo in r.status.lower()
+        ]
 
+    df_display = build_grouped_dataframe(filtrados)
     if df_display.empty:
         st.info("Nenhum registro encontrado para o filtro informado.")
     else:
