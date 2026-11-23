@@ -8,7 +8,7 @@ from decimal import Decimal
 from config.settings import TOLERANCIA_CENTAVOS
 from core.audit_logger import AuditLogger
 from core.models import RegistroBanco, RegistroSIAFIC, ResultadoConciliacao
-from reconciliation.consolidator import consolidate_bancos, consolidate_siafic
+from reconciliation.consolidator import _is_formato_completo, consolidate_bancos, consolidate_siafic
 from reconciliation.matcher import match_accounts
 
 
@@ -37,6 +37,18 @@ def _classificar_divergencia(
     return f"Divergência de Saldo ({erros[0]})"
 
 
+def _escolher_conta_completa(dados_s: dict | None, dados_b: dict | None, chave: str) -> str:
+    """Retorna o formato Banco-Agência-Conta (ex: 001-2234-2956241) dando preferência ao SIAFIC."""
+    c_s = dados_s.get("conta_completa", "") if dados_s else ""
+    c_b = dados_b.get("conta_completa", "") if dados_b else ""
+
+    if _is_formato_completo(c_s):
+        return c_s
+    if _is_formato_completo(c_b):
+        return c_b
+    return c_s or c_b or chave
+
+
 def run_reconciliation(
     registros_siafic: list[RegistroSIAFIC],
     registros_bancos: list[RegistroBanco],
@@ -60,12 +72,14 @@ def run_reconciliation(
         dados_s = par["siafic"]
         dados_b = par["banco"]
         alertas: list[str] = list(par["alertas_match"])
+        conta_completa = _escolher_conta_completa(dados_s, dados_b, par["chave"])
 
         # Caso 1: Conta existe apenas no SIAFIC
         if dados_s is not None and dados_b is None:
             resultados.append(
                 ResultadoConciliacao(
                     chave_conciliacao=par["chave"],
+                    conta_completa=conta_completa,
                     metodo_pareamento=par["metodo"],
                     banco="Não identificado",
                     descricao=dados_s["descricao"] or par["chave"],
@@ -93,6 +107,7 @@ def run_reconciliation(
             resultados.append(
                 ResultadoConciliacao(
                     chave_conciliacao=par["chave"],
+                    conta_completa=conta_completa,
                     metodo_pareamento=par["metodo"],
                     banco=f"{bancos_str} ({tipos_str})",
                     descricao="Conta sem lançamento no SIAFIC",
@@ -125,6 +140,7 @@ def run_reconciliation(
         resultados.append(
             ResultadoConciliacao(
                 chave_conciliacao=par["chave"],
+                conta_completa=conta_completa,
                 metodo_pareamento=par["metodo"],
                 banco=f"{bancos_str} ({tipos_str})",
                 descricao=dados_s["descricao"] or par["chave"],
@@ -142,8 +158,8 @@ def run_reconciliation(
             )
         )
 
-    # Ordena o resultado pelo número da conta padronizada
-    resultados.sort(key=lambda r: r.chave_conciliacao)
+    # Ordena o resultado pelo formato Banco-Agência-Conta
+    resultados.sort(key=lambda r: (r.conta_completa, r.chave_conciliacao))
 
     if logger:
         total = len(resultados)
