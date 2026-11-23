@@ -152,7 +152,7 @@ def main() -> None:
         else None
     )
 
-   resultados, registros_bancos, logger, mapa_de_para = _executar_pipeline(
+    resultados, registros_bancos, logger, mapa_de_para = _executar_pipeline(
         lista_013083=pacote_013083,
         lista_014387=pacote_014387,
         lista_pdfs=pacote_pdfs,
