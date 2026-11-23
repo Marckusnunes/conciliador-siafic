@@ -3,7 +3,6 @@ ui/tab_overview.py
 Aba 1: Visão Geral com tabela agrupada em dois níveis.
 """
 
-import re
 from decimal import Decimal
 import pandas as pd
 import streamlit as st
@@ -15,47 +14,19 @@ def _fmt_brl(valor: Decimal) -> str:
     return f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
-def _extrair_codigo_banco(banco: str) -> str:
-    texto = (banco or "").strip().upper()
-    if not texto:
-        return ""
-    if "BRASIL" in texto or texto == "BB" or texto.startswith("001"):
-        return "001"
-    if "CAIXA" in texto or "CEF" in texto or texto.startswith("104"):
-        return "104"
-    if "BRADESCO" in texto or texto.startswith("237"):
-        return "237"
-    digitos = re.sub(r"\D", "", texto)
-    return digitos.zfill(3) if digitos else texto
+def _identificador_bac(r: ResultadoConciliacao, mapa_bac: dict[str, str] | None) -> str:
+    if mapa_bac and r.chave_conciliacao in mapa_bac:
+        return mapa_bac[r.chave_conciliacao]
+    return r.chave_conciliacao or "-"
 
 
-def formatar_banco_agencia_conta(r: ResultadoConciliacao) -> str:
-    """
-    Formata a identificação no padrão '001-2234-2951981' quando disponível.
-    """
-    cod_banco = _extrair_codigo_banco(r.banco)
-    conta = (r.chave_conciliacao or "").strip()
-
-    # Tenta localizar agência no texto bruto de origem (ex.: '001 - 2234 - ...')
-    origem_texto = f"{r.banco} - {r.descricao}"
-    blocos = [p.strip() for p in origem_texto.split("-")]
-    nums = [re.sub(r"\D", "", p) for p in blocos if re.fullmatch(r"[\d\s]+", p.strip())]
-
-    agencia = ""
-    if len(nums) >= 2:
-        agencia = nums[1]
-
-    if cod_banco and agencia and conta:
-        return f"{cod_banco}-{agencia}-{conta}"
-    if cod_banco and conta:
-        return f"{cod_banco}-{conta}"
-    return conta or cod_banco or "-"
-
-
-def _linha_agrupada(r: ResultadoConciliacao) -> dict[tuple[str, str], str]:
+def _linha_agrupada(
+    r: ResultadoConciliacao,
+    mapa_bac: dict[str, str] | None = None,
+) -> dict[tuple[str, str], str]:
     """Monta uma linha sem 'Banco / Descrição' e com 'Banco - Agência - Conta'."""
     return {
-        ("Dados", "Banco - Agência - Conta"): formatar_banco_agencia_conta(r),
+        ("Dados", "Banco - Agência - Conta"): _identificador_bac(r, mapa_bac),
         ("Dados", "Conta Reduzida"): r.chave_conciliacao,
         ("Dados", "Status"): r.status,
         ("Conta Corrente", "Contábil"): _fmt_brl(r.siafic_cc),
@@ -70,9 +41,12 @@ def _linha_agrupada(r: ResultadoConciliacao) -> dict[tuple[str, str], str]:
     }
 
 
-def build_grouped_dataframe(resultados: list[ResultadoConciliacao]) -> pd.DataFrame:
+def build_grouped_dataframe(
+    resultados: list[ResultadoConciliacao],
+    mapa_bac: dict[str, str] | None = None,
+) -> pd.DataFrame:
     """Monta a tabela com cabeçalho duplo agrupado por bloco contábil."""
-    linhas = [_linha_agrupada(r) for r in resultados]
+    linhas = [_linha_agrupada(r, mapa_bac) for r in resultados]
     if not linhas:
         return pd.DataFrame()
 
@@ -84,6 +58,7 @@ def build_grouped_dataframe(resultados: list[ResultadoConciliacao]) -> pd.DataFr
 def _filtrar_resultados(
     resultados: list[ResultadoConciliacao],
     busca: str,
+    mapa_bac: dict[str, str] | None = None,
 ) -> list[ResultadoConciliacao]:
     termo = busca.strip().lower()
     if not termo:
@@ -91,14 +66,17 @@ def _filtrar_resultados(
     return [
         r for r in resultados
         if termo in r.chave_conciliacao.lower()
-        or termo in formatar_banco_agencia_conta(r).lower()
+        or termo in _identificador_bac(r, mapa_bac).lower()
         or termo in r.banco.lower()
         or termo in r.descricao.lower()
         or termo in r.status.lower()
     ]
 
 
-def render_tab_overview(resultados: list[ResultadoConciliacao]) -> None:
+def render_tab_overview(
+    resultados: list[ResultadoConciliacao],
+    mapa_bac: dict[str, str] | None = None,
+) -> None:
     """Exibe os indicadores resumidos, filtro rápido e a tabela agrupada."""
     total_contas = len(resultados)
     conciliadas = sum(1 for r in resultados if r.status == "Conciliado")
@@ -114,8 +92,8 @@ def render_tab_overview(resultados: list[ResultadoConciliacao]) -> None:
         placeholder="Digite conta (ex: 0088501), 001-2234 ou status...",
     )
 
-    filtrados = _filtrar_resultados(resultados, busca)
-    df_display = build_grouped_dataframe(filtrados)
+    filtrados = _filtrar_resultados(resultados, busca, mapa_bac)
+    df_display = build_grouped_dataframe(filtrados, mapa_bac)
 
     if df_display.empty:
         st.info("Nenhum registro encontrado para o filtro informado.")
