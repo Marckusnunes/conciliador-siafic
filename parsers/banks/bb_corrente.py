@@ -37,17 +37,12 @@ def _extrair_agencia_conta(text: str) -> tuple[str, str]:
     return agencia, conta_orig
 
 
-def _extrair_saldo_bb(text: str, filename: str) -> tuple[Decimal, list[str]]:
+def _buscar_ultimo_saldo_com_valor(lines: list[str]) -> Decimal | None:
     """
-    Busca o saldo final na linha 'SALDO' ou 'S A L D O' (olhando também as linhas
-    logo abaixo caso o valor venha quebrado), com fallback para 'Saldo Anterior' ou sem movimento.
+    Varre as linhas procurando 'SALDO' / 'S A L D O' (ignorando 'ANTERIOR', 'BLOQUEADO' e 'DISPON')
+    e pega o valor monetário na própria linha ou nas 3 linhas seguintes.
     """
-    observacoes: list[str] = []
-    lines = text.splitlines()
-    norm = normalize_pdf_text(text)
-
-    candidatos_fim_mes: list[Decimal] = []
-    candidatos_saldo: list[Decimal] = []
+    candidatos: list[Decimal] = []
 
     for idx, line in enumerate(lines):
         upper_line = line.upper()
@@ -56,34 +51,43 @@ def _extrair_saldo_bb(text: str, filename: str) -> tuple[Decimal, list[str]]:
         if _RE_ANTERIOR.search(upper_line) or "BLOQUEADO" in upper_line or "DISPON" in upper_line:
             continue
 
-        bloco = " ".join(lines[idx : min(len(lines), idx + 4)])
-        valores = extract_money_tokens(line) or extract_money_tokens(bloco)
-        if not valores:
-            continue
+        # Procura valor na própria linha ou até 3 linhas abaixo
+        for offset in range(0, 4):
+            pos = idx + offset
+            if pos < len(lines):
+                vals = extract_money_tokens(lines[pos])
+                if vals:
+                    candidatos.append(vals[-1])
+                    break
 
-        contexto = f"{lines[idx - 1] if idx > 0 else ''} {bloco}"
-        if re.search(r"\b(?:30|31)/\d{2}/\d{4}\b", contexto):
-            candidatos_fim_mes.append(valores[-1])
-        else:
-            candidatos_saldo.append(valores[-1])
+    return candidatos[-1] if candidatos else None
 
-    if candidatos_fim_mes:
-        return candidatos_fim_mes[-1], observacoes
 
-    if candidatos_saldo:
-        return candidatos_saldo[-1], observacoes
+def _extrair_saldo_bb(text: str, filename: str) -> tuple[Decimal, list[str]]:
+    """
+    Extrai o saldo final do extrato BB com proteções para linhas quebradas e contas sem movimento.
+    """
+    observacoes: list[str] = []
+    lines = text.splitlines()
+    norm = normalize_pdf_text(text)
 
-    ant_lines = [
-        line for line in lines
-        if "SALDO ANTERIOR" in normalize_pdf_text(line)
-        and bool(extract_money_tokens(line))
-    ]
-    if ant_lines:
-        observacoes.append(
-            "Linha final 'SALDO' não localizada: utilizado o 'Saldo Anterior' como referência."
-        )
-        return extract_money_tokens(ant_lines[-1])[-1], observacoes
+    saldo_final = _buscar_ultimo_saldo_com_valor(lines)
+    if saldo_final is not None:
+        return saldo_final, observacoes
 
+    # Fallback 1: procura 'Saldo Anterior' com valor numérico
+    for idx, line in enumerate(lines):
+        if "SALDO ANTERIOR" in normalize_pdf_text(line) or _RE_ANTERIOR.search(line.upper()):
+            for offset in range(0, 3):
+                if idx + offset < len(lines):
+                    vals = extract_money_tokens(lines[idx + offset])
+                    if vals:
+                        observacoes.append(
+                            "Linha final 'SALDO' sem valor explícito: utilizado o 'Saldo Anterior'."
+                        )
+                        return vals[-1], observacoes
+
+    # Fallback 2: conta sem movimentação explícita no extrato
     if any(k in norm for k in ("NAO FOI MOVIMENTADA", "SEM MOVIMENTACAO", "NAO HOUVE MOVIMENTACAO")):
         observacoes.append(
             "Conta sem movimentação e sem linha numérica de saldo: assumido R$ 0,00."
