@@ -16,7 +16,6 @@ from parsers.banks.registry import parse_bank_pdf
 from parsers.siafic.relatorio_013083 import parse_relatorio_013083
 from parsers.siafic.relatorio_014387 import parse_relatorio_014387
 from reconciliation.engine import run_reconciliation
-from ui.bac_formatter import construir_mapa_bac  # <--- AQUI (1) Importa a função BAC
 from ui.download_bar import render_download_bar
 from ui.sidebar_upload import render_upload_panel
 from ui.tab_audit import render_tab_depara, render_tab_log
@@ -126,7 +125,6 @@ def _executar_pipeline(
         logger=logger,
     )
 
-    st.session_state["mapa_bac"] = construir_mapa_bac(registros_siafic, registros_bancos)  # <--- AQUI (2) Monta o mapa BAC
     return resultados, registros_bancos, logger, mapa_de_para
 
 
@@ -162,8 +160,6 @@ def main() -> None:
         tolerancia_str=str(dados["tolerancia"]),
     )
 
-    mapa_bac = st.session_state.get("mapa_bac", {})  # <--- AQUI (3) Recupera o mapa BAC na main()
-
     erros = [ev for ev in logger.eventos if ev.nivel == "ERRO"]
     if erros:
         for err in erros:
@@ -183,12 +179,12 @@ def main() -> None:
     ])
 
     with tab1:
-        render_tab_overview(resultados, mapa_bac)  # <--- AQUI (4) Passa mapa_bac para Visão Geral
+        render_tab_overview(resultados)
         st.divider()
         render_download_bar(resultados, logger, dados["titulo_pdf"])
 
     with tab2:
-        render_tab_divergences(resultados, mapa_bac)  # <--- AQUI (5) Passa mapa_bac para Divergências
+        render_tab_divergences(resultados)
 
     with tab3:
         render_tab_log(registros_bancos, logger)
