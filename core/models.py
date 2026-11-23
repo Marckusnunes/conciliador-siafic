@@ -24,7 +24,7 @@ class RegistroSIAFIC:
     saldo_cc: Decimal = Decimal("0.00")
     saldo_aplic: Decimal = Decimal("0.00")
     rendimento: Decimal = Decimal("0.00")
-    conta_completa: str = ""     # Formato Banco-Agência-Conta (ex: 001-2234-2956241)
+    conta_completa: str = ""
 
     def __post_init__(self) -> None:
         if not self.conta_completa and self.chave_7d:
@@ -47,7 +47,7 @@ class RegistroBanco:
     saldo_aplic: Decimal = Decimal("0.00")
     rendimento: Decimal = Decimal("0.00")
     observacoes_auditoria: list[str] = field(default_factory=list)
-    conta_completa: str = ""     # Formato Banco-Agência-Conta (ex: 001-2234-2956241)
+    conta_completa: str = ""
 
     def __post_init__(self) -> None:
         if not self.conta_completa and self.chave_7d:
@@ -74,4 +74,4 @@ class ResultadoConciliacao:
     dif_rend: Decimal
     status: str                  # 'Conciliado', 'Divergência de Saldo', etc.
     alertas: list[str] = field(default_factory=list)
-    conta_completa: str = ""     # Formato Banco-Agência-Conta (ex: 001-2234-2956241)
+    conta_completa: str = ""
