@@ -6,6 +6,11 @@ Define as estruturas de dados padronizadas (Dataclasses) que trafegam entre os m
 from dataclasses import dataclass, field
 from decimal import Decimal
 
+from core.account_key import (
+    format_banco_agencia_conta_banco,
+    format_banco_agencia_conta_siafic,
+)
+
 
 @dataclass
 class RegistroSIAFIC:
@@ -19,6 +24,13 @@ class RegistroSIAFIC:
     saldo_cc: Decimal = Decimal("0.00")
     saldo_aplic: Decimal = Decimal("0.00")
     rendimento: Decimal = Decimal("0.00")
+    conta_completa: str = ""     # Formato Banco-Agência-Conta (ex: 001-2234-2956241)
+
+    def __post_init__(self) -> None:
+        if not self.conta_completa and self.chave_7d:
+            self.conta_completa = format_banco_agencia_conta_siafic(
+                self.conta_original, self.chave_7d
+            )
 
 
 @dataclass
@@ -35,6 +47,13 @@ class RegistroBanco:
     saldo_aplic: Decimal = Decimal("0.00")
     rendimento: Decimal = Decimal("0.00")
     observacoes_auditoria: list[str] = field(default_factory=list)
+    conta_completa: str = ""     # Formato Banco-Agência-Conta (ex: 001-2234-2956241)
+
+    def __post_init__(self) -> None:
+        if not self.conta_completa and self.chave_7d:
+            self.conta_completa = format_banco_agencia_conta_banco(
+                self.banco, self.agencia, self.chave_7d
+            )
 
 
 @dataclass
@@ -55,3 +74,4 @@ class ResultadoConciliacao:
     dif_rend: Decimal
     status: str                  # 'Conciliado', 'Divergência de Saldo', etc.
     alertas: list[str] = field(default_factory=list)
+    conta_completa: str = ""     # Formato Banco-Agência-Conta (ex: 001-2234-2956241)
