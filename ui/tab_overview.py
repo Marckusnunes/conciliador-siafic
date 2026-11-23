@@ -15,26 +15,47 @@ def _fmt_brl(valor: Decimal) -> str:
     return f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
-def formatar_banco_agencia_conta(texto_conta: str, conta_7d: str = "") -> str:
-    """
-    Formata para o padrão '001-2234-2951981' quando houver banco, agência e conta.
-    Se vier apenas a chave de 7 dígitos, retorna a própria chave.
-    """
-    partes = [p.strip() for p in str(texto_conta or "").split("-")]
-    blocos_num = [re.sub(r"\D", "", p) for p in partes if re.fullmatch(r"[\d\s]+", p.strip())]
+def _extrair_codigo_banco(banco: str) -> str:
+    texto = (banco or "").strip().upper()
+    if not texto:
+        return ""
+    if "BRASIL" in texto or texto == "BB" or texto.startswith("001"):
+        return "001"
+    if "CAIXA" in texto or "CEF" in texto or texto.startswith("104"):
+        return "104"
+    if "BRADESCO" in texto or texto.startswith("237"):
+        return "237"
+    digitos = re.sub(r"\D", "", texto)
+    return digitos.zfill(3) if digitos else texto
 
-    if len(blocos_num) >= 3:
-        banco = blocos_num[0].zfill(3)
-        agencia = blocos_num[1]
-        conta = (conta_7d or blocos_num[2][-7:].zfill(7))
-        return f"{banco}-{agencia}-{conta}"
 
-    return conta_7d or str(texto_conta or "").strip()
+def formatar_banco_agencia_conta(r: ResultadoConciliacao) -> str:
+    """
+    Formata a identificação no padrão '001-2234-2951981' quando disponível.
+    """
+    cod_banco = _extrair_codigo_banco(r.banco)
+    conta = (r.chave_conciliacao or "").strip()
+
+    # Tenta localizar agência no texto bruto de origem (ex.: '001 - 2234 - ...')
+    origem_texto = f"{r.banco} - {r.descricao}"
+    blocos = [p.strip() for p in origem_texto.split("-")]
+    nums = [re.sub(r"\D", "", p) for p in blocos if re.fullmatch(r"[\d\s]+", p.strip())]
+
+    agencia = ""
+    if len(nums) >= 2:
+        agencia = nums[1]
+
+    if cod_banco and agencia and conta:
+        return f"{cod_banco}-{agencia}-{conta}"
+    if cod_banco and conta:
+        return f"{cod_banco}-{conta}"
+    return conta or cod_banco or "-"
 
 
 def _linha_agrupada(r: ResultadoConciliacao) -> dict[tuple[str, str], str]:
-    """Monta uma linha sem 'Banco / Descrição' e sem coluna de Banco/Agência/Conta."""
+    """Monta uma linha sem 'Banco / Descrição' e com 'Banco - Agência - Conta'."""
     return {
+        ("Dados", "Banco - Agência - Conta"): formatar_banco_agencia_conta(r),
         ("Dados", "Conta Reduzida"): r.chave_conciliacao,
         ("Dados", "Status"): r.status,
         ("Conta Corrente", "Contábil"): _fmt_brl(r.siafic_cc),
@@ -70,6 +91,7 @@ def _filtrar_resultados(
     return [
         r for r in resultados
         if termo in r.chave_conciliacao.lower()
+        or termo in formatar_banco_agencia_conta(r).lower()
         or termo in r.banco.lower()
         or termo in r.descricao.lower()
         or termo in r.status.lower()
@@ -88,8 +110,8 @@ def render_tab_overview(resultados: list[ResultadoConciliacao]) -> None:
     c3.metric("Divergências / Pendências", divergentes)
 
     busca = st.text_input(
-        "Buscar por conta, banco ou descrição:",
-        placeholder="Digite o número da conta (ex: 0088501), banco ou fundo...",
+        "Buscar por conta, banco, agência ou status:",
+        placeholder="Digite conta (ex: 0088501), 001-2234 ou status...",
     )
 
     filtrados = _filtrar_resultados(resultados, busca)
