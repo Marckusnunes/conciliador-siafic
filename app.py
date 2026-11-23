@@ -138,6 +138,7 @@ def main() -> None:
         if not dados["arquivos_013083"]:
             st.warning("⚠️ Obrigatório carregar pelo menos um arquivo de Saldos (CSV - 013083).")
             return
+        st.cache_data.clear()
         st.session_state["conciliacao_ativa"] = True
 
     if not st.session_state.get("conciliacao_ativa") or not dados["arquivos_013083"]:
