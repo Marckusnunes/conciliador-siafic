@@ -23,7 +23,8 @@ def _preencher_aba_conciliacao(
 ) -> None:
     """Preenche uma aba do Excel com os dados, fórmulas e estilos."""
     headers = [
-        "Conta (7d)",
+        "Banco-Agência-Conta",
+        "Conta Reduzida (7d)",
         "Pareamento",
         "Banco / Tipo",
         "Descrição",
@@ -49,36 +50,37 @@ def _preencher_aba_conciliacao(
 
     for row_idx, r in enumerate(linhas, start=2):
         ws.append([
+            r.conta_completa or r.chave_conciliacao,
             r.chave_conciliacao,
             r.metodo_pareamento,
             r.banco,
             r.descricao,
             float(r.siafic_cc),
             float(r.banco_cc),
-            f"=E{row_idx}-F{row_idx}",
+            f"=F{row_idx}-G{row_idx}",
             float(r.siafic_aplic),
             float(r.banco_aplic),
-            f"=H{row_idx}-I{row_idx}",
+            f"=I{row_idx}-J{row_idx}",
             float(r.siafic_rend),
             float(r.banco_rend),
-            f"=K{row_idx}-L{row_idx}",
+            f"=L{row_idx}-M{row_idx}",
             r.status,
             " | ".join(r.alertas) if r.alertas else "",
         ])
 
-        # Formata todas as colunas financeiras em R$
-        for money_col in (5, 6, 7, 8, 9, 10, 11, 12, 13):
+        # Formata todas as colunas financeiras em R$ (colunas 6 a 14)
+        for money_col in range(6, 15):
             ws.cell(row=row_idx, column=money_col).number_format = money_fmt
 
-        # Pinta a célula de Status (Verde = Conciliado | Laranja = Divergência)
-        status_cell = ws.cell(row=row_idx, column=14)
+        # Pinta a célula de Status (coluna 15)
+        status_cell = ws.cell(row=row_idx, column=15)
         status_cell.fill = ok_fill if r.status == "Conciliado" else warn_fill
         status_cell.font = Font(bold=True)
 
     # Ajusta a largura das colunas automaticamente para nada ficar cortado
     for col in ws.columns:
         max_len = max((len(str(c.value or "")) for c in col), default=12)
-        ws.column_dimensions[get_column_letter(col[0].column)].width = min(max(max_len + 3, 13), 42)
+        ws.column_dimensions[get_column_letter(col[0].column)].width = min(max(max_len + 3, 14), 42)
 
 
 def export_to_excel(
@@ -88,28 +90,24 @@ def export_to_excel(
     """Cria o arquivo Excel completo na memória e retorna seus bytes."""
     wb = openpyxl.Workbook()
 
-    # Paleta de cores ajustável (formato Hexadecimal sem '#')
     header_fill = PatternFill(start_color="1F4E78", end_color="1F4E78", fill_type="solid")
     header_font = Font(color="FFFFFF", bold=True, size=10)
     ok_fill = PatternFill(start_color="E2EFDA", end_color="E2EFDA", fill_type="solid")
     warn_fill = PatternFill(start_color="FCE4D6", end_color="FCE4D6", fill_type="solid")
     money_fmt = 'R$ #,##0.00;[Red]-R$ #,##0.00;"-"'
 
-    # Aba 1: Visão Geral Completa
     ws_all = wb.active
     ws_all.title = "Conciliação Completa"
     _preencher_aba_conciliacao(
         ws_all, resultados, header_fill, header_font, ok_fill, warn_fill, money_fmt
     )
 
-    # Aba 2: Apenas Divergências e Pendências
     ws_div = wb.create_sheet(title="Divergências")
     divergentes = [r for r in resultados if r.status != "Conciliado"]
     _preencher_aba_conciliacao(
         ws_div, divergentes, header_fill, header_font, ok_fill, warn_fill, money_fmt
     )
 
-    # Aba 3: Trilha de Auditoria
     ws_aud = wb.create_sheet(title="Trilha de Auditoria")
     ws_aud.append(["Data/Hora", "Nível", "Arquivo / Origem", "Mensagem"])
     for col_idx in range(1, 5):
