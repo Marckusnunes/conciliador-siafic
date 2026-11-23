@@ -6,12 +6,8 @@ Agrupa registros individuais do SIAFIC e dos Bancos em tabelas consolidadas por 
 from decimal import Decimal
 from typing import Any
 
+from core.account_key import format_banco_agencia_conta_banco, format_banco_agencia_conta_siafic
 from core.models import RegistroBanco, RegistroSIAFIC
-
-
-def _is_formato_completo(texto: str) -> bool:
-    """Verifica se o texto já está no padrão Banco-Agência-Conta (contém dois hífens)."""
-    return bool(texto) and texto.count("-") >= 2
 
 
 def consolidate_siafic(
@@ -20,19 +16,19 @@ def consolidate_siafic(
 ) -> dict[str, dict[str, Any]]:
     """
     Agrupa todas as linhas dos relatórios 013083 e 014387 por chave de conta.
-    Retorna um dicionário indexado pela chave padronizada de 7 dígitos.
     """
     consolidado: dict[str, dict[str, Any]] = {}
 
     for reg in registros:
         chave_final = mapa_de_para.get(reg.chave_7d, reg.chave_7d)
         usou_de_para = reg.chave_7d in mapa_de_para
+        bac = format_banco_agencia_conta_siafic(reg.conta_original, chave_final)
 
         if chave_final not in consolidado:
             consolidado[chave_final] = {
                 "chave_7d": chave_final,
                 "chave_7d_sem_dv": reg.chave_7d_sem_dv,
-                "conta_completa": reg.conta_completa or chave_final,
+                "conta_completa": bac,
                 "descricao": reg.descricao,
                 "saldo_cc": Decimal("0.00"),
                 "saldo_aplic": Decimal("0.00"),
@@ -42,12 +38,10 @@ def consolidate_siafic(
             }
 
         item = consolidado[chave_final]
+        if ("-" not in item.get("conta_completa", "")) and "-" in bac:
+            item["conta_completa"] = bac
         if not item["descricao"] and reg.descricao:
             item["descricao"] = reg.descricao
-
-        # Prioriza o formato completo Banco-Agência-Conta caso algum relatório só tenha a chave curta
-        if not _is_formato_completo(item["conta_completa"]) and _is_formato_completo(reg.conta_completa):
-            item["conta_completa"] = reg.conta_completa
 
         item["saldo_cc"] += reg.saldo_cc
         item["saldo_aplic"] += reg.saldo_aplic
@@ -63,20 +57,20 @@ def consolidate_bancos(
     mapa_de_para: dict[str, str],
 ) -> dict[str, dict[str, Any]]:
     """
-    Agrupa todos os extratos bancários PDF por chave de conta,
-    somando saldos de CC, Aplicação/Poupança e Rendimentos vinculados.
+    Agrupa todos os extratos bancários PDF por chave de conta.
     """
     consolidado: dict[str, dict[str, Any]] = {}
 
     for reg in registros:
         chave_final = mapa_de_para.get(reg.chave_7d, reg.chave_7d)
         usou_de_para = reg.chave_7d in mapa_de_para
+        bac = format_banco_agencia_conta_banco(reg.banco, reg.agencia, chave_final)
 
         if chave_final not in consolidado:
             consolidado[chave_final] = {
                 "chave_7d": chave_final,
                 "chave_7d_sem_dv": reg.chave_7d_sem_dv,
-                "conta_completa": reg.conta_completa or chave_final,
+                "conta_completa": bac,
                 "bancos": set(),
                 "tipos_conta": set(),
                 "saldo_cc": Decimal("0.00"),
@@ -88,9 +82,8 @@ def consolidate_bancos(
             }
 
         item = consolidado[chave_final]
-        if not _is_formato_completo(item["conta_completa"]) and _is_formato_completo(reg.conta_completa):
-            item["conta_completa"] = reg.conta_completa
-
+        if ("-" not in item.get("conta_completa", "")) and "-" in bac:
+            item["conta_completa"] = bac
         item["bancos"].add(reg.banco)
         item["tipos_conta"].add(reg.tipo_conta)
         item["saldo_cc"] += reg.saldo_cc
