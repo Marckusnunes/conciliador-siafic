@@ -11,7 +11,6 @@ from parsers.banks.base import BaseBankParser, extract_money_tokens, normalize_p
 
 _RE_SALDO = re.compile(r"\bS\s*A\s*L\s*D\s*O\b", re.IGNORECASE)
 _RE_ANTERIOR = re.compile(r"A\s*N\s*T\s*E\s*R\s*I\s*O\s*R", re.IGNORECASE)
-_RE_FIM_MES = re.compile(r"\b(?:30|31)/\d{2}/\d{4}\b")
 
 
 def _extrair_agencia_conta(text: str) -> tuple[str, str]:
@@ -28,21 +27,10 @@ def _extrair_agencia_conta(text: str) -> tuple[str, str]:
     return agencia, conta_orig
 
 
-def _valor_em_linha_ou_vizinhas(lines: list[str], idx: int) -> Decimal | None:
-    """Busca o valor monetário na linha idx ou até 4 linhas abaixo."""
-    for offset in range(0, 5):
-        pos = idx + offset
-        if pos < len(lines):
-            vals = extract_money_tokens(lines[pos])
-            if vals:
-                return vals[-1]
-    return None
-
-
 def _extrair_saldo_bb(text: str, filename: str) -> tuple[Decimal, list[str]]:
     """
-    Extrai o saldo final da linha com 'SALDO' / 'S A L D O' na última linha
-    de lançamentos (priorizando data 30/ ou 31/ e ignorando 'Saldo Anterior').
+    Busca o saldo final na linha 'SALDO' / 'S A L D O' (olhando também as linhas
+    seguintes caso o valor venha separado), ignorando 'Saldo Anterior' e cabeçalhos.
     """
     observacoes: list[str] = []
     lines = text.splitlines()
@@ -58,45 +46,44 @@ def _extrair_saldo_bb(text: str, filename: str) -> tuple[Decimal, list[str]]:
         if _RE_ANTERIOR.search(upper) or "BLOQUEADO" in upper or "DISPON" in upper:
             continue
 
-        val = _valor_em_linha_ou_vizinhas(lines, idx)
-        if val is None:
+        # Procura valor na própria linha ou até 3 linhas abaixo
+        vals: list[Decimal] = []
+        for offset in range(0, 4):
+            if idx + offset < len(lines):
+                encontrados = extract_money_tokens(lines[idx + offset])
+                if encontrados:
+                    vals = encontrados
+                    break
+
+        if not vals:
             continue
 
-        contexto = " ".join(lines[max(0, idx - 1) : min(len(lines), idx + 3)])
-        if _RE_FIM_MES.search(contexto):
-            candidatos_fim_mes.append(val)
+        contexto = " ".join(lines[max(0, idx - 1) : min(len(lines), idx + 2)])
+        if re.search(r"\b(?:30|31)/\d{2}/\d{4}\b", contexto):
+            candidatos_fim_mes.append(vals[-1])
         else:
-            candidatos_saldo.append(val)
+            candidatos_saldo.append(vals[-1])
 
     if candidatos_fim_mes:
         return candidatos_fim_mes[-1], observacoes
-
     if candidatos_saldo:
         return candidatos_saldo[-1], observacoes
 
-    # Fallback para linha de fechamento 30/ ou 31/ com valor monetário
-    for line in reversed(lines):
-        if _RE_FIM_MES.search(line) and not _RE_ANTERIOR.search(line.upper()):
-            vals = extract_money_tokens(line)
-            if vals:
-                observacoes.append(
-                    "Rótulo 'SALDO' não isolado na mesma linha: utilizado o último valor da linha de fechamento (30/31)."
-                )
-                return vals[-1], observacoes
-
     # Fallback para conta sem movimentação com 'Saldo Anterior'
     for idx, line in enumerate(lines):
-        if "SALDO ANTERIOR" in normalize_pdf_text(line) or _RE_ANTERIOR.search(line.upper()):
-            val = _valor_em_linha_ou_vizinhas(lines, idx)
-            if val is not None:
-                observacoes.append(
-                    "Conta sem linha final 'SALDO': utilizado o 'Saldo Anterior'."
-                )
-                return val, observacoes
+        if "SALDO ANTERIOR" in normalize_pdf_text(line):
+            for offset in range(0, 3):
+                if idx + offset < len(lines):
+                    vals = extract_money_tokens(lines[idx + offset])
+                    if vals:
+                        observacoes.append(
+                            "Conta sem movimentação no período: utilizado o 'Saldo Anterior'."
+                        )
+                        return vals[-1], observacoes
 
     if any(k in norm for k in ("NAO FOI MOVIMENTADA", "SEM MOVIMENTACAO", "NAO HOUVE MOVIMENTACAO")):
         observacoes.append(
-            "Conta sem movimentação e sem valor numérico de saldo: assumido R$ 0,00."
+            "Conta sem movimentação e sem linha numérica de saldo: assumido R$ 0,00."
         )
         return Decimal("0.00"), observacoes
 
