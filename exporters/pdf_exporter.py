@@ -27,8 +27,7 @@ def _texto_seguro(texto: str, max_len: int = 45) -> str:
 
 def _fmt_moeda(valor: Decimal) -> str:
     """Formata valor Decimal como '1.234,56'."""
-    texto = f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
-    return texto
+    return f"{valor:,.2f}".replace(",", "X").replace(".", ",").replace("X", ".")
 
 
 class _RelatorioPDF(FPDF):
@@ -61,7 +60,6 @@ def export_to_pdf(
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_page()
 
-    # Bloco de Resumo Executivo
     total = len(resultados)
     conciliados = sum(1 for r in resultados if r.status == "Conciliado")
     divergentes = total - conciliados
@@ -78,27 +76,27 @@ def export_to_pdf(
 
     # Cabeçalho da Tabela (largura total = 277 mm na folha A4 paisagem)
     colunas = [
-        ("Conta", 18),
-        ("Banco/Tipo", 28),
-        ("Descrição", 47),
-        ("SIAFIC CC", 24),
-        ("Banco CC", 24),
-        ("Dif. CC", 22),
-        ("SIAFIC Aplic", 25),
-        ("Banco Aplic", 25),
-        ("Dif. Rend", 22),
-        ("Status", 42),
+        ("Banco-Ag-Conta", 28),
+        ("Reduzida", 16),
+        ("Banco/Tipo", 25),
+        ("Descrição", 38),
+        ("SIAFIC CC", 23),
+        ("Banco CC", 23),
+        ("Dif. CC", 21),
+        ("SIAFIC Aplic", 23),
+        ("Banco Aplic", 23),
+        ("Dif. Rend", 20),
+        ("Status", 37),
     ]
 
-    pdf.set_font("Helvetica", "B", 7.5)
+    pdf.set_font("Helvetica", "B", 7.0)
     pdf.set_fill_color(31, 78, 120)
     pdf.set_text_color(255, 255, 255)
     for nome_col, largura in colunas:
         pdf.cell(largura, 7, _texto_seguro(nome_col, 25), border=1, align="C", fill=True)
     pdf.ln()
 
-    # Linhas de Dados
-    pdf.set_font("Helvetica", "", 7)
+    pdf.set_font("Helvetica", "", 6.8)
     pdf.set_text_color(0, 0, 0)
 
     for r in resultados:
@@ -108,16 +106,17 @@ def export_to_pdf(
             pdf.set_fill_color(252, 228, 214)
 
         valores_linha = [
-            (r.chave_conciliacao, 18, "C"),
-            (_texto_seguro(r.banco, 18), 28, "L"),
-            (_texto_seguro(r.descricao, 30), 47, "L"),
-            (_fmt_moeda(r.siafic_cc), 24, "R"),
-            (_fmt_moeda(r.banco_cc), 24, "R"),
-            (_fmt_moeda(r.dif_cc), 22, "R"),
-            (_fmt_moeda(r.siafic_aplic), 25, "R"),
-            (_fmt_moeda(r.banco_aplic), 25, "R"),
-            (_fmt_moeda(r.dif_rend), 22, "R"),
-            (_texto_seguro(r.status, 26), 42, "L"),
+            (_texto_seguro(r.conta_completa or r.chave_conciliacao, 20), 28, "C"),
+            (r.chave_conciliacao, 16, "C"),
+            (_texto_seguro(r.banco, 16), 25, "L"),
+            (_texto_seguro(r.descricao, 24), 38, "L"),
+            (_fmt_moeda(r.siafic_cc), 23, "R"),
+            (_fmt_moeda(r.banco_cc), 23, "R"),
+            (_fmt_moeda(r.dif_cc), 21, "R"),
+            (_fmt_moeda(r.siafic_aplic), 23, "R"),
+            (_fmt_moeda(r.banco_aplic), 23, "R"),
+            (_fmt_moeda(r.dif_rend), 20, "R"),
+            (_texto_seguro(r.status, 24), 37, "L"),
         ]
 
         for texto_cel, largura, alinhamento in valores_linha:
