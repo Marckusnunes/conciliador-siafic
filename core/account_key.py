@@ -1,6 +1,6 @@
 """
 core/account_key.py
-Padronização de números de contas bancárias/contábeis e aplicação da tabela De-Para.
+Padronização de números de contas bancárias/contábeis, formatação Banco-Agência-Conta e De-Para.
 """
 
 import csv
@@ -10,6 +10,17 @@ from typing import Tuple
 
 # Quantidade padrão de dígitos usada para cruzar contas entre SIAFIC e Bancos
 TAMANHO_CHAVE = 7
+
+# Tabela de códigos FEBRABAN dos bancos suportados (parâmetro ajustável)
+CODIGOS_BANCO: dict[str, str] = {
+    "BB": "001",
+    "BANCO DO BRASIL": "001",
+    "CAIXA": "104",
+    "CEF": "104",
+    "CAIXA ECONOMICA": "104",
+    "CAIXA ECONÔMICA": "104",
+    "BRADESCO": "237",
+}
 
 
 def normalize_account_keys(raw_account: str) -> Tuple[str, str]:
@@ -24,7 +35,6 @@ def normalize_account_keys(raw_account: str) -> Tuple[str, str]:
     text = str(raw_account).strip().upper()
 
     # 1. Padrão SIAFIC com hífens ("001 - 2234 - 0000000088501 - NOME DO FUNDO")
-    # Isola apenas o maior bloco que contém somente números (ignora números no nome do fundo)
     if " - " in text:
         parts = [p.strip() for p in text.split("-")]
         numeric_parts = [re.sub(r"\D", "", p) for p in parts if re.fullmatch(r"[\d\s\.]+", p)]
@@ -55,6 +65,56 @@ def normalize_account_keys(raw_account: str) -> Tuple[str, str]:
     chave_7d_sem_dv = digits_without_dv[-TAMANHO_CHAVE:].zfill(TAMANHO_CHAVE)
 
     return chave_7d, chave_7d_sem_dv
+
+
+def format_banco_agencia_conta_siafic(raw_account: str, chave_7d: str) -> str:
+    """
+    Extrai Banco, Agência e Conta de strings do SIAFIC e formata como '001-2234-2956241'.
+    Caso o texto original não contenha banco/agência, devolve a própria chave reduzida.
+    """
+    if not chave_7d:
+        return ""
+    if not raw_account:
+        return chave_7d
+
+    text = str(raw_account).strip().upper()
+
+    # Padrão com hífens: "001 - 2234 - 0000000088501 - NOME..."
+    m_hifen = re.match(r"^\s*(\d{1,4})\s*-\s*(\d{1,6}(?:-[\dX])?)\s*-\s*([\d\.]+)", text)
+    if m_hifen:
+        banco = m_hifen.group(1).zfill(3)
+        ag_base = m_hifen.group(2).split("-")[0]
+        ag_digits = re.sub(r"\D", "", ag_base)
+        agencia = str(int(ag_digits)).zfill(4) if ag_digits else "0000"
+        return f"{banco}-{agencia}-{chave_7d}"
+
+    # Padrão com pontos: "001. 2234.0000000088501.1.7.59"
+    m_ponto = re.match(r"^\s*(\d{1,4})\.\s*(\d{1,6})\.\s*(\d+)", text)
+    if m_ponto:
+        banco = m_ponto.group(1).zfill(3)
+        ag_digits = re.sub(r"\D", "", m_ponto.group(2))
+        agencia = str(int(ag_digits)).zfill(4) if ag_digits else "0000"
+        return f"{banco}-{agencia}-{chave_7d}"
+
+    return chave_7d
+
+
+def format_banco_agencia_conta_banco(banco_nome: str, agencia_raw: str, chave_7d: str) -> str:
+    """
+    Monta o formato '001-2234-2956241' (Banco-Agência-Conta) a partir dos dados do PDF.
+    """
+    if not chave_7d:
+        return ""
+
+    b_upper = (banco_nome or "").strip().upper()
+    digits_banco = re.sub(r"\D", "", b_upper)
+    cod_banco = CODIGOS_BANCO.get(b_upper, digits_banco.zfill(3) if digits_banco else "000")
+
+    ag_base = (agencia_raw or "").split("-")[0]
+    ag_digits = re.sub(r"\D", "", ag_base)
+    agencia = str(int(ag_digits)).zfill(4) if ag_digits else "0000"
+
+    return f"{cod_banco}-{agencia}-{chave_7d}"
 
 
 def load_de_para_map(csv_path: str | Path) -> dict[str, str]:
