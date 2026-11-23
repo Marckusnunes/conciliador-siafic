@@ -20,7 +20,7 @@ from ui.download_bar import render_download_bar
 from ui.sidebar_upload import render_upload_panel
 from ui.tab_audit import render_tab_depara, render_tab_log
 from ui.tab_divergences import render_tab_divergences
-from ui.tab_overview import indexar_banco_agencia_conta, render_tab_overview
+from ui.tab_overview import render_tab_overview
 
 st.set_page_config(
     page_title="Conciliação Contábil",
@@ -160,8 +160,6 @@ def main() -> None:
         tolerancia_str=str(dados["tolerancia"]),
     )
 
-    detalhe_bancario = indexar_banco_agencia_conta(registros_bancos)
-
     erros = [ev for ev in logger.eventos if ev.nivel == "ERRO"]
     if erros:
         for err in erros:
@@ -181,12 +179,12 @@ def main() -> None:
     ])
 
     with tab1:
-        render_tab_overview(resultados, detalhe_bancario)
+        render_tab_overview(resultados)
         st.divider()
         render_download_bar(resultados, logger, dados["titulo_pdf"])
 
     with tab2:
-        render_tab_divergences(resultados, detalhe_bancario)
+        render_tab_divergences(resultados)
 
     with tab3:
         render_tab_log(registros_bancos, logger)
