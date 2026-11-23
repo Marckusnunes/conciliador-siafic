@@ -10,58 +10,103 @@ from core.models import RegistroBanco
 from parsers.banks.base import BaseBankParser, extract_money_tokens, normalize_pdf_text
 
 
-class BBCorrenteParser(BaseBankParser):
-    def can_parse(self, text: str) -> bool:
-        norm = normalize_pdf_text(text)
-        return (
-            "EXTRATO DE CONTA CORRENTE" in norm
-            and ("BANCO DO BRASIL" in norm or "AUTOATENDIMENTO.BB.COM.BR" in norm)
+def _extrair_agencia_conta_bb(text: str) -> tuple[str, str]:
+    """Extrai Agência e Conta Corrente mesmo com quebras de linha ou pipes."""
+    ag_match = re.search(r"Ag[êe]ncia\s*[\r\n\s\|:]*([\d\-]+)", text, re.IGNORECASE)
+    cc_match = re.search(
+        r"Conta\s+corrente\s*[\r\n\s\|:]*([\d\.\-X]+)", text, re.IGNORECASE
+    )
+    if not cc_match:
+        cc_match = re.search(
+            r"Conta\s*[\r\n\s\|:]*([\d\.\-X]{4,})", text, re.IGNORECASE
         )
 
-    def parse(self, text: str, filename: str) -> list[RegistroBanco]:
-        ag_match = re.search(r"Ag[êe]ncia\s*\|?\s*([\d\-]+)", text, re.IGNORECASE)
-        cc_match = re.search(r"Conta\s+corrente\s*\|?\s*([\d\.\-X]+)", text, re.IGNORECASE)
+    agencia = ag_match.group(1).strip() if ag_match else ""
+    conta_orig = cc_match.group(1).strip() if cc_match else ""
+    return agencia, conta_orig
 
-        agencia = ag_match.group(1).strip() if ag_match else ""
-        conta_orig = cc_match.group(1).strip() if cc_match else ""
-        chave_7d, chave_7d_sem_dv = normalize_account_keys(conta_orig)
 
-        observacoes: list[str] = []
-        norm = normalize_pdf_text(text)
+def _extrair_saldo_final_bb(text: str) -> tuple[Decimal, list[str]]:
+    """
+    Localiza o saldo final na última linha de lançamentos com 'SALDO'
+    (priorizando datas 30/ ou 31/ e ignorando 'Saldo Anterior' e cabeçalhos).
+    """
+    observacoes: list[str] = []
+    lines = text.splitlines()
+    norm_full = normalize_pdf_text(text)
 
-        # Nível 1: Busca linhas com 'SALDO' que realmente contenham um valor em dinheiro
-        # (ignora automaticamente o cabeçalho 'Histórico Documento Valor R$ Saldo')
-        saldo_lines = [
-            line for line in text.splitlines()
-            if re.search(r"\bSALDO\b", line, re.IGNORECASE)
-            and "ANTERIOR" not in line.upper()
-            and "BLOQUEADO" not in line.upper()
-            and "DISPON" not in line.upper()
-            and bool(extract_money_tokens(line))
-        ]
+    candidatos_fim_mes: list[Decimal] = []
+    candidatos_saldo: list[Decimal] = []
 
-        if saldo_lines:
-            saldo_final = extract_money_tokens(saldo_lines[-1])[-1]
+    for idx, line in enumerate(lines):
+        upper_line = line.upper()
+        if not re.search(r"\bSALDO\b", upper_line):
+            continue
+        if any(ign in upper_line for ign in ("ANTERIOR", "BLOQUEADO", "DISPON")):
+            continue
+
+        # Ignora a linha isolada do cabeçalho da tabela ("| Saldo") sem valores numéricos
+        bloco_janela = " ".join(lines[idx : min(len(lines), idx + 5)])
+        valores_janela = extract_money_tokens(bloco_janela)
+        valores_linha = extract_money_tokens(line)
+
+        # Se a linha não tem número próprio e não é um lançamento (sem data na linha ou na anterior),
+        # provavelmente é apenas o título da coluna "Saldo".
+        tem_data = bool(re.search(r"\b\d{2}/\d{2}/\d{4}\b", line)) or (
+            idx > 0 and bool(re.search(r"\b\d{2}/\d{2}/\d{4}\b", lines[idx - 1]))
+        )
+        if not valores_linha and not tem_data:
+            continue
+
+        vals = valores_linha if valores_linha else valores_janela
+        if not vals:
+            continue
+
+        contexto_data = f"{lines[idx - 1] if idx > 0 else ''} {line} {bloco_janela}"
+        eh_fim_mes = bool(re.search(r"\b(?:30|31)/\d{2}/\d{4}\b", contexto_data))
+
+        if eh_fim_mes:
+            candidatos_fim_mes.append(vals[-1])
         else:
-            # Nível 2: Conta sem movimentação que traz apenas 'Saldo Anterior' com valor
-            ant_lines = [
-                line for line in text.splitlines()
-                if "SALDO ANTERIOR" in normalize_pdf_text(line)
-                and bool(extract_money_tokens(line))
-            ]
-            if ant_lines:
-                saldo_final = extract_money_tokens(ant_lines[-1])[-1]
+            candidatos_saldo.append(vals[-1])
+
+    if candidatos_fim_mes:
+        return candidatos_fim_mes[-1], observacoes
+
+    if candidatos_saldo:
+        return candidatos_saldo[-1], observacoes
+
+    # Fallback para conta sem movimentação que exibe apenas 'Saldo Anterior'
+    for idx, line in enumerate(lines):
+        if "SALDO ANTERIOR" in normalize_pdf_text(line):
+            bloco_ant = " ".join(lines[idx : min(len(lines), idx + 4)])
+            vals_ant = extract_money_tokens(bloco_ant)
+            if vals_ant:
                 observacoes.append(
                     "Conta sem movimentação no período: utilizado o 'Saldo Anterior' como saldo final."
                 )
-            elif "NAO FOI MOVIMENTADA" in norm or "SEM MOVIMENTACAO" in norm:
-                # Nível 3: Conta zerada sem lançamentos nem linha de saldo numérico
-                saldo_final = Decimal("0.00")
-                observacoes.append(
-                    "Conta sem movimentação e sem linha de saldo numérico: assumido R$ 0,00."
-                )
-            else:
-                raise ValueError(f"Não foi possível localizar um valor de 'SALDO' em '{filename}'.")
+                return vals_ant[-1], observacoes
+
+    if "NAO FOI MOVIMENTADA" in norm_full or "SEM MOVIMENTACAO" in norm_full:
+        observacoes.append(
+            "Conta sem movimentação e sem linha de saldo numérico: assumido R$ 0,00."
+        )
+        return Decimal("0.00"), observacoes
+
+    raise ValueError("Não foi possível localizar um valor de 'SALDO' válido no extrato BB.")
+
+
+class BBCorrenteParser(BaseBankParser):
+    def can_parse(self, text: str) -> bool:
+        norm = normalize_pdf_text(text)
+        return "EXTRATO DE CONTA CORRENTE" in norm and (
+            "BANCO DO BRASIL" in norm or "AUTOATENDIMENTO.BB.COM.BR" in norm
+        )
+
+    def parse(self, text: str, filename: str) -> list[RegistroBanco]:
+        agencia, conta_orig = _extrair_agencia_conta_bb(text)
+        chave_7d, chave_7d_sem_dv = normalize_account_keys(conta_orig)
+        saldo_final, observacoes = _extrair_saldo_final_bb(text)
 
         return [
             RegistroBanco(
