@@ -21,6 +21,34 @@ CODIGOS_BANCO: dict[str, str] = {
 }
 
 
+def _extrair_bloco_conta(raw_account: str) -> str:
+    """Isola a parte do número da conta de textos compostos (SIAFIC ou PDF)."""
+    text = str(raw_account).strip().upper()
+
+    # Formato típico SIAFIC: '001 - 2234 - 0000000088501 - DESCRICAO'
+    if " - " in text:
+        parts = [p.strip() for p in text.split(" - ")]
+        numeric_parts = [re.sub(r"\D", "", p) for p in parts if re.fullmatch(r"[\d\s\.]+", p)]
+        if len(numeric_parts) >= 3:
+            return numeric_parts[2]
+        long_numeric = [p for p in numeric_parts if len(p) > 4]
+        if long_numeric:
+            return max(long_numeric, key=len)
+
+    # Conta contábil longa com pontos (> 12 chars)
+    if len(text) > 12 and "." in text:
+        blocks = [re.sub(r"\D", "", part) for part in text.split(".")]
+        valid_blocks = [b for b in blocks if len(b) > 4]
+        if valid_blocks:
+            return max(valid_blocks, key=len)
+
+    # Agência/conta separadas por barra
+    if "/" in text:
+        text = text.split("/")[-1]
+
+    return re.sub(r"\D", "", text)
+
+
 def normalize_account_keys(raw_account: str) -> Tuple[str, str]:
     """
     Transforma qualquer formato de conta em duas chaves padronizadas:
@@ -30,25 +58,7 @@ def normalize_account_keys(raw_account: str) -> Tuple[str, str]:
     if not raw_account:
         return "", ""
 
-    text = str(raw_account).strip().upper()
-
-    if " - " in text:
-        parts = [p.strip() for p in text.split("-")]
-        numeric_parts = [re.sub(r"\D", "", p) for p in parts if re.fullmatch(r"[\d\s\.]+", p)]
-        long_numeric = [p for p in numeric_parts if len(p) > 4]
-        if long_numeric:
-            text = max(long_numeric, key=len)
-
-    if len(text) > 12 and "." in text:
-        blocks = [re.sub(r"\D", "", part) for part in text.split(".")]
-        valid_blocks = [b for b in blocks if len(b) > 4]
-        if valid_blocks:
-            text = max(valid_blocks, key=len)
-
-    if "/" in text:
-        text = text.split("/")[-1]
-
-    digits_only = re.sub(r"\D", "", text)
+    digits_only = _extrair_bloco_conta(raw_account)
     if not digits_only:
         return "", ""
 
@@ -60,51 +70,52 @@ def normalize_account_keys(raw_account: str) -> Tuple[str, str]:
     return chave_7d, chave_7d_sem_dv
 
 
+def _normalizar_agencia(agencia_raw: str) -> str:
+    ag_base = (agencia_raw or "").split("-")[0]
+    ag_digits = re.sub(r"\D", "", ag_base)
+    return str(int(ag_digits)).zfill(4) if ag_digits else "0000"
+
+
 def format_banco_agencia_conta_siafic(raw_account: str, chave_7d: str) -> str:
     """
     Extrai Banco, Agência e Conta de strings do SIAFIC e formata como '001-2234-0088501'.
     """
-    if not chave_7d:
+    conta_final = (chave_7d or "").strip()
+    if not conta_final and raw_account:
+        conta_final, _ = normalize_account_keys(raw_account)
+    if not conta_final:
         return ""
-    if not raw_account:
-        return chave_7d
 
-    text = str(raw_account).strip().upper()
-
+    text = str(raw_account or "").strip().upper()
     m_hifen = re.match(r"^\s*(\d{1,4})\s*-\s*(\d{1,6}(?:-[\dX])?)\s*-\s*([\d\.]+)", text)
     if m_hifen:
         banco = m_hifen.group(1).zfill(3)
-        ag_base = m_hifen.group(2).split("-")[0]
-        ag_digits = re.sub(r"\D", "", ag_base)
-        agencia = str(int(ag_digits)).zfill(4) if ag_digits else "0000"
-        return f"{banco}-{agencia}-{chave_7d}"
+        agencia = _normalizar_agencia(m_hifen.group(2))
+        return f"{banco}-{agencia}-{conta_final}"
 
     m_ponto = re.match(r"^\s*(\d{1,4})\.\s*(\d{1,6})\.\s*(\d+)", text)
     if m_ponto:
         banco = m_ponto.group(1).zfill(3)
-        ag_digits = re.sub(r"\D", "", m_ponto.group(2))
-        agencia = str(int(ag_digits)).zfill(4) if ag_digits else "0000"
-        return f"{banco}-{agencia}-{chave_7d}"
+        agencia = _normalizar_agencia(m_ponto.group(2))
+        return f"{banco}-{agencia}-{conta_final}"
 
-    return chave_7d
+    return conta_final
 
 
 def format_banco_agencia_conta_banco(banco_nome: str, agencia_raw: str, chave_7d: str) -> str:
     """
     Monta o formato '001-2234-2956241' (Banco-Agência-Conta) a partir dos dados do PDF.
     """
-    if not chave_7d:
+    conta_final = (chave_7d or "").strip()
+    if not conta_final:
         return ""
 
     b_upper = (banco_nome or "").strip().upper()
     digits_banco = re.sub(r"\D", "", b_upper)
     cod_banco = CODIGOS_BANCO.get(b_upper, digits_banco.zfill(3) if digits_banco else "000")
+    agencia = _normalizar_agencia(agencia_raw)
 
-    ag_base = (agencia_raw or "").split("-")[0]
-    ag_digits = re.sub(r"\D", "", ag_base)
-    agencia = str(int(ag_digits)).zfill(4) if ag_digits else "0000"
-
-    return f"{cod_banco}-{agencia}-{chave_7d}"
+    return f"{cod_banco}-{agencia}-{conta_final}"
 
 
 def load_de_para_map(csv_path: str | Path) -> dict[str, str]:
