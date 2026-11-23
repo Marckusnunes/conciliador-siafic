@@ -8,10 +8,8 @@ import re
 from pathlib import Path
 from typing import Tuple
 
-# Quantidade padrão de dígitos usada para cruzar contas entre SIAFIC e Bancos
 TAMANHO_CHAVE = 7
 
-# Tabela de códigos FEBRABAN dos bancos suportados (parâmetro ajustável)
 CODIGOS_BANCO: dict[str, str] = {
     "BB": "001",
     "BANCO DO BRASIL": "001",
@@ -34,7 +32,6 @@ def normalize_account_keys(raw_account: str) -> Tuple[str, str]:
 
     text = str(raw_account).strip().upper()
 
-    # 1. Padrão SIAFIC com hífens ("001 - 2234 - 0000000088501 - NOME DO FUNDO")
     if " - " in text:
         parts = [p.strip() for p in text.split("-")]
         numeric_parts = [re.sub(r"\D", "", p) for p in parts if re.fullmatch(r"[\d\s\.]+", p)]
@@ -42,25 +39,21 @@ def normalize_account_keys(raw_account: str) -> Tuple[str, str]:
         if long_numeric:
             text = max(long_numeric, key=len)
 
-    # 2. Conta estruturada longa com pontos (ex: "001. 2234.0000000088501.1.7.59")
     if len(text) > 12 and "." in text:
         blocks = [re.sub(r"\D", "", part) for part in text.split(".")]
         valid_blocks = [b for b in blocks if len(b) > 4]
         if valid_blocks:
             text = max(valid_blocks, key=len)
 
-    # 3. Se vier agência/conta separadas por barra (ex: "1234/56789-0"), pega após a última barra
     if "/" in text:
         text = text.split("/")[-1]
 
-    # 4. Mantém apenas números (apaga traços, espaços e letras como o dígito 'X')
     digits_only = re.sub(r"\D", "", text)
     if not digits_only:
         return "", ""
 
     chave_7d = digits_only[-TAMANHO_CHAVE:].zfill(TAMANHO_CHAVE)
 
-    # 5. Gera chave alternativa sem o último dígito verificador (DV)
     digits_without_dv = digits_only[:-1] if len(digits_only) > 1 else digits_only
     chave_7d_sem_dv = digits_without_dv[-TAMANHO_CHAVE:].zfill(TAMANHO_CHAVE)
 
@@ -69,8 +62,7 @@ def normalize_account_keys(raw_account: str) -> Tuple[str, str]:
 
 def format_banco_agencia_conta_siafic(raw_account: str, chave_7d: str) -> str:
     """
-    Extrai Banco, Agência e Conta de strings do SIAFIC e formata como '001-2234-2956241'.
-    Caso o texto original não contenha banco/agência, devolve a própria chave reduzida.
+    Extrai Banco, Agência e Conta de strings do SIAFIC e formata como '001-2234-0088501'.
     """
     if not chave_7d:
         return ""
@@ -79,7 +71,6 @@ def format_banco_agencia_conta_siafic(raw_account: str, chave_7d: str) -> str:
 
     text = str(raw_account).strip().upper()
 
-    # Padrão com hífens: "001 - 2234 - 0000000088501 - NOME..."
     m_hifen = re.match(r"^\s*(\d{1,4})\s*-\s*(\d{1,6}(?:-[\dX])?)\s*-\s*([\d\.]+)", text)
     if m_hifen:
         banco = m_hifen.group(1).zfill(3)
@@ -88,7 +79,6 @@ def format_banco_agencia_conta_siafic(raw_account: str, chave_7d: str) -> str:
         agencia = str(int(ag_digits)).zfill(4) if ag_digits else "0000"
         return f"{banco}-{agencia}-{chave_7d}"
 
-    # Padrão com pontos: "001. 2234.0000000088501.1.7.59"
     m_ponto = re.match(r"^\s*(\d{1,4})\.\s*(\d{1,6})\.\s*(\d+)", text)
     if m_ponto:
         banco = m_ponto.group(1).zfill(3)
