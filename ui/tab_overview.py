@@ -25,6 +25,7 @@ def build_grouped_dataframe(resultados: list[ResultadoConciliacao]) -> pd.DataFr
         )
         linhas.append({
             ("Dados", "Banco / Descrição"): desc_exibicao,
+            ("Dados", "Banco-Agência-Conta"): r.conta_completa or r.chave_conciliacao,
             ("Dados", "Conta Reduzida"): r.chave_conciliacao,
             ("Dados", "Status"): r.status,
             ("Conta Corrente", "Contábil"): _fmt_brl(r.siafic_cc),
@@ -58,8 +59,8 @@ def render_tab_overview(resultados: list[ResultadoConciliacao]) -> None:
     c3.metric("Divergências / Pendências", divergentes)
 
     busca = st.text_input(
-        "Buscar por conta, banco ou descrição:",
-        placeholder="Digite o número da conta (ex: 0088501), banco ou fundo...",
+        "Buscar por conta, agência, banco ou descrição:",
+        placeholder="Digite a conta (ex: 001-2234-2956241 ou 2956241), banco ou fundo...",
     )
 
     filtrados = resultados
@@ -68,6 +69,7 @@ def render_tab_overview(resultados: list[ResultadoConciliacao]) -> None:
         filtrados = [
             r for r in resultados
             if termo in r.chave_conciliacao.lower()
+            or termo in r.conta_completa.lower()
             or termo in r.banco.lower()
             or termo in r.descricao.lower()
             or termo in r.status.lower()
