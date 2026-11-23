@@ -20,9 +20,9 @@ def export_to_csv(resultados: list[ResultadoConciliacao]) -> bytes:
     buffer = io.StringIO()
     writer = csv.writer(buffer, delimiter=";", lineterminator="\n")
 
-    # Cabeçalho da tabela
     writer.writerow([
-        "Conta_7d",
+        "Banco_Agencia_Conta",
+        "Conta_Reduzida_7d",
         "Metodo_Pareamento",
         "Banco_Tipo",
         "Descricao",
@@ -41,6 +41,7 @@ def export_to_csv(resultados: list[ResultadoConciliacao]) -> bytes:
 
     for r in resultados:
         writer.writerow([
+            r.conta_completa or r.chave_conciliacao,
             r.chave_conciliacao,
             r.metodo_pareamento,
             r.banco,
@@ -58,5 +59,4 @@ def export_to_csv(resultados: list[ResultadoConciliacao]) -> bytes:
             " | ".join(r.alertas) if r.alertas else "",
         ])
 
-    # utf-8-sig adiciona a marcação que faz o Excel abrir acentos corretamente
     return buffer.getvalue().encode("utf-8-sig")
